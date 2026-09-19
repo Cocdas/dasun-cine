@@ -232,22 +232,23 @@ def resolve_csplayer_link(url: str = Query(..., description="CSPlayer Download U
         response.raise_for_status()
         html = response.text
         
-        soup = BeautifulSoup(html, 'html.parser')
         actual_urls = []
         
-        # අපට අනවශ්‍ය ලින්ක්ස් (Blacklist)
-        unwanted_keywords = ['cinesubzmoviesofficial', 'share', 'facebook', 'twitter', 'instagram', 'whatsapp']
+        # 1. Telegram Bot ලින්ක් එක සෙවීම (?start= අනිවාර්යයෙන්ම තිබිය යුතුය)
+        tg_links = re.findall(r'(https?://(?:t\.me|telegram\.me)/[a-zA-Z0-9_]+\?start=[a-zA-Z0-9_]+)', html)
+        for tg in tg_links:
+            if not any(d['url'] == tg for d in actual_urls):
+                actual_urls.append({"url": tg})
+                
+        # 2. Token සහිත MP4 ලින්ක් එක සෙවීම (JavaScript ඇතුළත වුවද අල්ලා ගනී)
+        # ඩොමේන් එකෙන් පටන් ගෙන .mp4 හෝ token= අඩංගු ඕනෑම ලින්ක් එකක්
+        token_links = re.findall(r'(https?://[^\s"\'<>]+(?:token=[a-zA-Z0-9\.\-\_]+|\.mp4))', html)
         
-        for a_tag in soup.find_all('a', href=True):
-            href = a_tag['href']
-            
-            # Telegram, Drive හෝ MP4 ලින්ක් එකක් දැයි පරීක්ෂා කිරීම
-            is_potential_dl = 'telegram.me' in href or 't.me' in href or 'drive' in href.lower() or '.mp4' in href or '.mkv' in href or 'token=' in href
-            
-            # අනවශ්‍ය ලින්ක් එකක් (CineSubzMoviesOfficial වැනි) නොවන බව තහවුරු කිරීම
-            if is_potential_dl and not any(bad in href.lower() for bad in unwanted_keywords):
-                if not any(d['url'] == href for d in actual_urls):
-                    actual_urls.append({"url": href})
+        for dl in token_links:
+            # CSPlayer මූලික ලින්ක් එක මඟ හැරීම සහ Token/MP4 සහිත ඒවා පමණක් ගැනීම
+            if ('token=' in dl or '.mp4' in dl) and 'cinesubz' not in dl.lower():
+                if not any(d['url'] == dl for d in actual_urls):
+                    actual_urls.append({"url": dl})
                     
         return {
             "author": "@DasunNethsara",
