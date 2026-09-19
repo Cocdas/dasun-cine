@@ -156,7 +156,6 @@ def get_movie_details(url: str = Query(..., description="Movie page URL")):
                 meta_span = btn.find('span', class_='movie-download-meta')
                 meta_text = meta_span.text if meta_span else ""
                 
-                # Quality, Size, Language වෙන් කරගැනීම
                 parts = [p.strip() for p in meta_text.split('•')]
                 quality = parts[0] if len(parts) > 0 else "Unknown Quality"
                 size = parts[1] if len(parts) > 1 else "Unknown Size"
@@ -222,7 +221,7 @@ def get_movie_details(url: str = Query(..., description="Movie page URL")):
 
 @app.get("/api/cinesubz/resolve")
 def resolve_csplayer_link(url: str = Query(..., description="CSPlayer Download URL")):
-    """CSPlayer ලින්ක් එකකට ගොස් සැබෑ Direct MP4 සහ Telegram ලින්ක්ස් Bypass කරයි."""
+    """CSPlayer ලින්ක් එකකට ගොස් සැබෑ Direct MP4 සහ Telegram Bot ලින්ක්ස් Bypass කරයි."""
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -237,7 +236,14 @@ def resolve_csplayer_link(url: str = Query(..., description="CSPlayer Download U
         
         for a_tag in soup.find_all('a', href=True):
             href = a_tag['href']
-            if 'telegram.me' in href or 't.me' in href or '?token=' in href or '.mp4' in href or 'drive' in href:
+            
+            # Telegram Bot ලින්ක් එක හඳුනාගැනීම (?start= අඩංගු විය යුතුය)
+            is_telegram_bot = ('telegram.me' in href or 't.me' in href) and '?start=' in href
+            
+            # Direct MP4 ලින්ක් එක හඳුනාගැනීම (?token= හෝ .mp4 අඩංගු විය යුතුය)
+            is_direct_file = '?token=' in href or '.mp4' in href
+            
+            if is_telegram_bot or is_direct_file:
                 if not any(d['url'] == href for d in actual_urls):
                     actual_urls.append({"url": href})
                     
