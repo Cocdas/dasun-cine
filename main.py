@@ -4,149 +4,37 @@ from bs4 import BeautifulSoup
 from urllib.parse import quote
 import re
 
-# API එක ආරම්භ කිරීම - Developed by Dasun Nethsara
-app = FastAPI(title="Movie & Drama Scraper API", description="Automated scraping tool for Dramakey, Downloadwella, and CineSubz")
+# CineSubz සඳහා පමණක් වෙන්වූ API එක - Developed by Dasun Nethsara
+app = FastAPI(
+    title="CineSubz Scraper API",
+    description="Dedicated Scraper API for CineSubz movies, series, and direct download links"
+)
 
+BASE_URL = "https://cinesubz.lk/"
+
+# -------------------------------------------------------------
+# 1. ROOT ENDPOINT (API එක පරීක්ෂා කිරීම)
+# -------------------------------------------------------------
 @app.get("/")
 def read_root():
-    """API එක නිවැරදිව වැඩ කරනවාද යන්න පරීක්ෂා කිරීමේ endpoint එක."""
     return {
-        "message": "Welcome to the Scraper API!",
+        "message": "Welcome to the CineSubz API!",
         "developer": "Dasun Nethsara",
         "status": "Running smoothly 🚀"
     }
 
-# ==========================================
-# 1. DRAMAKEY & DOWNLOADWELLA ENDPOINTS
-# ==========================================
-
-@app.get("/api/dramas")
-def get_dramas():
-    """Dramakey මුල් පිටුවෙන් Drama මාතෘකා සහ links ලබා දෙයි."""
-    try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        response = requests.get("https://dramakey.com/", headers=headers)
-        response.raise_for_status() 
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        dramas = []
-        
-        for heading in soup.find_all(['h2', 'h3']):
-            link_tag = heading.find('a')
-            if link_tag:
-                title = link_tag.text.strip()
-                link = link_tag.get('href')
-                if title and link:
-                    dramas.append({"title": title, "link": link})
-                    
-        return {"status": "success", "total_dramas_found": len(dramas), "data": dramas}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-@app.get("/api/download")
-def get_download_links(url: str):
-    """අදාළ ඩ්‍රාමා පිටුවේ ඇති ඩවුන්ලෝඩ් ලින්ක්ස් (Downloadwella/වෙනත්) ලබා දෙයි."""
-    try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        response = requests.get(url, headers=headers)
-        response.raise_for_status() 
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        download_links = []
-        content_area = soup.find('div', class_='entry-content')
-        
-        if content_area:
-            for link_tag in content_area.find_all('a'):
-                link_text = link_tag.text.strip()
-                link_href = link_tag.get('href')
-                if link_text and link_href and link_href.startswith('http'):
-                    download_links.append({"label": link_text, "url": link_href})
-                    
-        return {"status": "success", "drama_url": url, "download_links": download_links}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-@app.get("/api/downloadwella")
-def get_downloadwella_direct_link(url: str):
-    """Downloadwella ලින්ක් එකක් ලබාගෙන, POST request එකක් මගින් form submit කර එහි අවසාන Direct Link එක ලබා දෙයි."""
-    try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": url
-        }
-        
-        session = requests.Session()
-        
-        # පියවර 1: GET request යවා සැඟවුණු form data ලබා ගැනීම
-        response = session.get(url, headers=headers)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        form = soup.find('form')
-        if not form:
-            return {"status": "error", "message": "Form not found on step 1."}
-            
-        form_data = {}
-        for input_tag in form.find_all('input'):
-            input_name = input_tag.get('name')
-            if input_name:
-                form_data[input_name] = input_tag.get('value', '')
-                
-        # පියවර 2: POST request එක මගින් 'Create Download Link' එබීම
-        post_response = session.post(url, data=form_data, headers=headers)
-        post_response.raise_for_status()
-        
-        # පියවර 3: දෙවන පිටුවෙන් Direct Link එක සෙවීම
-        post_soup = BeautifulSoup(post_response.text, 'html.parser')
-        direct_link = None
-        all_links = []
-        
-        for a_tag in post_soup.find_all('a'):
-            href = a_tag.get('href')
-            if href:
-                all_links.append(href)
-                if href.endswith(('.mkv', '.mp4', '.zip', '.rar')) or '/d/' in href:
-                    direct_link = href
-                    break
-        
-        if not direct_link:
-            span_link = post_soup.find('span', id='direct_link')
-            if span_link and span_link.find('a'):
-                direct_link = span_link.find('a').get('href')
-
-        if direct_link:
-            return {
-                "status": "success", 
-                "developer": "Dasun Nethsara",
-                "original_url": url, 
-                "direct_download_link": direct_link
-            }
-        else:
-            return {
-                "status": "error", 
-                "message": "Could not find the final direct link. Inspect 'debug_links_found'.",
-                "debug_links_found": all_links
-            }
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-# ==========================================
-# 2. CINESUBZ ENDPOINTS
-# ==========================================
-
-CINESUBZ_BASE_URL = "https://cinesubz.lk/"
-
+# -------------------------------------------------------------
+# 2. SEARCH ENDPOINT (චිත්‍රපට සහ ටීවී කතා මාලා සෙවීම)
+# -------------------------------------------------------------
 @app.get("/api/cinesubz/search")
-def search_movies(query: str = Query(..., description="Movie name to search")):
-    """CineSubz වෙබ් අඩවිය තුළ චිත්‍රපට සෙවීම සහ අලුත් JSON ආකෘතියට ප්‍රතිඵල ලබා දීම."""
+def search_movies(query: str = Query(..., description="සෙවිය යුතු චිත්‍රපටයේ නම")):
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": CINESUBZ_BASE_URL
+            "Referer": BASE_URL
         }
         
-        search_url = f"{CINESUBZ_BASE_URL}?s={quote(query)}"
-        
+        search_url = f"{BASE_URL}?s={quote(query)}"
         response = requests.get(search_url, headers=headers)
         response.raise_for_status()
         
@@ -156,6 +44,7 @@ def search_movies(query: str = Query(..., description="Movie name to search")):
         movies = []
         tvshows = []
         
+        # CineSubz හි චිත්‍රපට කාඩ්පත් (display-item) හඳුනාගැනීම
         items = soup.find_all('div', class_='display-item')
         
         for item in items:
@@ -171,6 +60,7 @@ def search_movies(query: str = Query(..., description="Movie name to search")):
                     
                 link = a_tag.get('href', '')
                 
+                # lazy-load පින්තූර ලබා ගැනීම
                 image = ''
                 if img_tag:
                     image = img_tag.get('data-original') or img_tag.get('src', '')
@@ -178,10 +68,13 @@ def search_movies(query: str = Query(..., description="Movie name to search")):
                 imdb_score = imdb_tag.text.strip() if imdb_tag else ""
                 
                 if title and link:
+                    # මාතෘකාවෙන් වර්ෂය වෙන් කිරීම
                     year_match = re.search(r'\((\d{4})\)', title)
                     year = year_match.group(1) if year_match else ""
                     
-                    media_type = "TV Show" if a_tag.get('data-ptype') == 'tvshows' or '/tvshows/' in link else "Movie"
+                    # Movie හෝ TV Show ද යන්න තීරණය කිරීම
+                    is_tv = a_tag.get('data-ptype') == 'tvshows' or '/tvshows/' in link
+                    media_type = "TV Show" if is_tv else "Movie"
                     
                     result_obj = {
                         "title": title,
@@ -190,7 +83,7 @@ def search_movies(query: str = Query(..., description="Movie name to search")):
                         "link": link,
                         "image": image,
                         "type": media_type,
-                        "description": "" 
+                        "description": ""
                     }
                     
                     all_results.append(result_obj)
@@ -213,55 +106,129 @@ def search_movies(query: str = Query(..., description="Movie name to search")):
     except Exception as e:
         return {"status": False, "author": "@DasunNethsara", "message": str(e)}
 
+# -------------------------------------------------------------
+# 3. MOVIE DETAILS & CSPLAYER LINKS (විස්තර සහ ඩවුන්ලෝඩ් ලින්ක්ස්)
+# -------------------------------------------------------------
 @app.get("/api/cinesubz/movie")
-def get_movie_download_links(url: str = Query(..., description="Movie page URL from search results")):
-    """CineSubz ලින්ක් එක (URL) ලබා දී, එහි ඇති ඩවුන්ලෝඩ් ලින්ක්ස් සහ විස්තර ලබා ගනී."""
+def get_movie_details(url: str = Query(..., description="චිත්‍රපටයේ CineSubz URL එක")):
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": CINESUBZ_BASE_URL
+            "Referer": BASE_URL
         }
         response = requests.get(url, headers=headers)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
+        # 1. මාතෘකාව සහ මූලික විස්තර
         title_element = soup.find('h1')
-        title = title_element.text.strip() if title_element else "Unknown Movie"
+        title = title_element.text.strip() if title_element else "Unknown Title"
         
-        download_links = []
+        year_match = re.search(r'\((\d{4})\)', title)
+        year = year_match.group(1) if year_match else ""
         
-        for a_tag in soup.find_all('a'):
-            href = a_tag.get('href')
+        maintitle = re.sub(r'Sinhala Subtitles.*', '', title).strip()
+        
+        # පින්තූර ලබා ගැනීම
+        images = []
+        main_image = ""
+        for img in soup.find_all('img'):
+            src = img.get('data-src') or img.get('src') or ""
+            if src.startswith('http') and ('uploads' in src or 'tmdb.org' in src):
+                if src not in images:
+                    images.append(src)
+        if images:
+            main_image = images[0]
+
+        # 2. නළු නිළියන් සහ අධ්‍යක්ෂවරුන්
+        cast_list = []
+        directors = []
+        
+        for a_tag in soup.find_all('a', href=True):
+            href = a_tag['href']
+            name = a_tag.text.strip()
+            if '/cast/' in href and name:
+                if not any(c['actor']['name'] == name for c in cast_list):
+                    cast_list.append({"actor": {"name": name, "link": href}, "character": ""})
+            elif '/director/' in href and name:
+                if name not in directors:
+                    directors.append(name)
+
+        # 3. ඩවුන්ලෝඩ් ලින්ක්ස් (CSPlayer links) සෙවීම
+        download_urls = []
+        for a_tag in soup.find_all('a', href=True):
+            href = a_tag['href']
             text = a_tag.text.strip()
             
-            if href and href.startswith('http'):
-                ignored_domains = ['facebook.com', 't.me', 'telegram.me', 'whatsapp.com', 'twitter.com', '#', 'instagram.com', 'youtube.com']
-                if not any(domain in href for domain in ignored_domains):
-                    keywords = ['download', '1080p', '720p', '480p', 'pixeldrain', 'gofile', 'mega', 'zippy', 'drive', 'hubcloud']
-                    if any(kw in text.lower() or kw in href.lower() for kw in keywords):
-                        if not any(d['url'] == href for d in download_links):
-                            download_links.append({
-                                "quality_or_label": text if text else "Download Link",
-                                "url": href
-                            })
-                            
-        if not download_links:
-            for a_tag in soup.find_all('a', class_=lambda x: x and ('button' in x or 'btn' in x or 'maxbutton' in x)):
-                href = a_tag.get('href')
-                text = a_tag.text.strip()
-                if href and href.startswith('http'):
-                    download_links.append({
-                        "quality_or_label": text if text else "Download Link",
-                        "url": href
+            if 'csplayer' in href or 'drive.' in href:
+                quality = "720p" if "720" in text else "1080p" if "1080" in text else "480p" if "480" in text else "WEB-DL"
+                size_match = re.search(r'(\d+(?:\.\d+)?\s*(?:MB|GB))', text, re.IGNORECASE)
+                size = size_match.group(1) if size_match else "Unknown Size"
+                
+                if not any(d['link'] == href for d in download_urls):
+                    download_urls.append({
+                        "quality": quality,
+                        "size": size,
+                        "language": "Kannada/Sinhala",
+                        "link": href
                     })
 
         return {
-            "status": "success",
-            "title": title,
-            "movie_url": url,
-            "total_links": len(download_links),
-            "download_links": download_links
+            "author": "@DasunNethsara",
+            "status": True,
+            "data": {
+                "maintitle": maintitle,
+                "title": title,
+                "dateCreate": year,
+                "country": "India",
+                "runtime": "",
+                "category": [],
+                "mainImage": main_image,
+                "imageUrls": images[:2],
+                "description": "",
+                "rating": {"value": "00", "count": "00"},
+                "imdb": {"value": "", "count": "00"},
+                "director": {"name": directors},
+                "cast": cast_list,
+                "downloadUrl": download_urls
+            }
         }
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"status": False, "author": "@DasunNethsara", "message": str(e)}
+
+# -------------------------------------------------------------
+# 4. CSPLAYER RESOLVE ENDPOINT (ඩවුන්ලෝඩ් ලින්ක් එක Bypass කිරීම)
+# -------------------------------------------------------------
+@app.get("/api/cinesubz/resolve")
+def resolve_csplayer_link(url: str = Query(..., description="CSPlayer Download URL")):
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+        
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        html = response.text
+        
+        soup = BeautifulSoup(html, 'html.parser')
+        actual_urls = []
+        
+        for a_tag in soup.find_all('a', href=True):
+            href = a_tag['href']
+            # Telegram Bot ලින්ක් එක හෝ Direct MP4 සබැඳිය ලබා ගැනීම
+            if 'telegram.me' in href or 't.me' in href or '?token=' in href or '.mp4' in href or 'drive' in href:
+                if not any(d['url'] == href for d in actual_urls):
+                    actual_urls.append({"url": href})
+                    
+        return {
+            "author": "@DasunNethsara",
+            "status": True,
+            "data": {
+                "title": "Direct Download File",
+                "size": "Original Quality",
+                "downloadUrls": actual_urls
+            }
+        }
+    except Exception as e:
+        return {"status": False, "author": "@DasunNethsara", "message": str(e)}
