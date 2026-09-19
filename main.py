@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Query
 import requests
-from bs4ational import BeautifulSoup
+from bs4 import BeautifulSoup
 
 # API එක ආරම්භ කිරීම - CineSubz Scraper API (Developer: Dasun Nethsara)
 app = FastAPI(title="CineSubz Scraper API", description="Scrape search results and direct download links from CineSubz")
@@ -24,7 +24,6 @@ def search_movies(query: str = Query(..., description="Movie name to search")):
             "Referer": BASE_URL
         }
         
-        # CineSubz සෙවුම් URL එක සකස් කිරීම
         search_url = f"{BASE_URL}?s={query}"
         
         response = requests.get(search_url, headers=headers)
@@ -33,11 +32,9 @@ def search_movies(query: str = Query(..., description="Movie name to search")):
         soup = BeautifulSoup(response.text, 'html.parser')
         results = []
         
-        # WordPress post හෝ article අඩංගු විවිධ elements සෙවීම
         items = soup.find_all(['article', 'div'], class_=lambda x: x and ('post' in x or 'item' in x or 'ittl' in x or 'search-item' in x))
         
         if not items:
-            # වෙනත් ටැග්ස් මගින් උත්සාහ කිරීම (Fallback)
             items = soup.find_all('div', class_='result-item') or soup.find_all('article')
 
         for item in items:
@@ -49,13 +46,11 @@ def search_movies(query: str = Query(..., description="Movie name to search")):
                 title = title_tag.text.strip()
                 link = link_tag.get('href')
                 
-                # පින්තූරය ලබා ගැනීම (lazy load images හැසිරවීම)
                 image = None
                 if img_tag:
                     image = img_tag.get('data-src') or img_tag.get('src') or img_tag.get('data-lazy-src')
                 
                 if title and link and link.startswith('http'):
-                    # ඩුප්ලිකට් ලින්ක්ස් වැළැක්වීම
                     if not any(r['link'] == link for r in results):
                         results.append({
                             "title": title,
@@ -88,13 +83,11 @@ def get_movie_download_links(url: str = Query(..., description="Movie page URL f
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # චිත්‍රපටයේ නම ලබා ගැනීම
         title_element = soup.find('h1')
         title = title_element.text.strip() if title_element else "Unknown Movie"
         
         download_links = []
         
-        # ඩවුන්ලෝඩ් ලින්ක්ස් සෙවීම
         for a_tag in soup.find_all('a'):
             href = a_tag.get('href')
             text = a_tag.text.strip()
@@ -102,7 +95,6 @@ def get_movie_download_links(url: str = Query(..., description="Movie page URL f
             if href and href.startswith('http'):
                 ignored_domains = ['facebook.com', 't.me', 'telegram.me', 'whatsapp.com', 'twitter.com', '#', 'instagram.com']
                 if not any(domain in href for domain in ignored_domains):
-                    # ඩවුන්ලෝඩ් හෝ ක්වොලිටි ආශ්‍රිත වචන තිබේදැයි පරීක්ෂා කිරීම
                     keywords = ['download', '1080p', '720p', '480p', 'pixeldrain', 'gofile', 'mega', 'zippy', 'drive']
                     if any(kw in text.lower() or kw in href.lower() for kw in keywords):
                         if not any(d['url'] == href for d in download_links):
@@ -111,7 +103,6 @@ def get_movie_download_links(url: str = Query(..., description="Movie page URL f
                                 "url": href
                             })
                             
-        # කිසිදු ලින්ක් එකක් හමු නොවූ නම් බොත්තම් (buttons) පරීක්ෂා කිරීම
         if not download_links:
             for a_tag in soup.find_all('a', class_=lambda x: x and ('button' in x or 'btn' in x or 'maxbutton' in x)):
                 href = a_tag.get('href')
