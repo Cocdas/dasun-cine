@@ -221,7 +221,7 @@ def get_movie_details(url: str = Query(..., description="Movie page URL")):
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # 1. නිවැරදි මාතෘකාව ලබා ගැනීම (Meta tags හරහා)
+        # 1. නිවැරදි මාතෘකාව ලබා ගැනීම
         meta_title = soup.find('meta', property='og:title')
         if meta_title:
             title = meta_title.get('content', '').split('|')[0].strip()
@@ -246,7 +246,6 @@ def get_movie_details(url: str = Query(..., description="Movie page URL")):
         # 2. නළු නිළියන් සහ අධ්‍යක්ෂවරුන්
         cast_list = []
         directors = []
-        
         for a_tag in soup.find_all('a', href=True):
             href = a_tag['href']
             name = a_tag.text.strip()
@@ -257,25 +256,53 @@ def get_movie_details(url: str = Query(..., description="Movie page URL")):
                 if name not in directors:
                     directors.append(name)
 
-        # 3. Download ලින්ක්ස් ලබා ගැනීම (පුළුල් සෙවුම)
+        # 3. ඩවුන්ලෝඩ් ලින්ක්ස් ලබා ගැනීම (zt-links විසඳීම)
         download_urls = []
-        ignored_domains = ['facebook.com', 'twitter.com', 'instagram.com', 'whatsapp.com', 'cinesubz.lk', 'cinesubz.net']
         
-        for a_tag in soup.find_all('a', href=True):
-            href = a_tag['href']
-            text = a_tag.text.strip()
-            classes = a_tag.get('class', [])
-            
-            if not any(ign in href for ign in ignored_domains) and href.startswith('http'):
+        # අලුත් ආකෘතිය: 'movie-download-button' සෙවීම
+        download_buttons = soup.find_all('a', class_='movie-download-button')
+        
+        if download_buttons:
+            for btn in download_buttons:
+                href = btn.get('href', '')
+                meta_span = btn.find('span', class_='movie-download-meta')
+                meta_text = meta_span.text if meta_span else ""
                 
-                is_button = any('btn' in str(c).lower() or 'button' in str(c).lower() or 'maxbutton' in str(c).lower() for c in classes)
-                has_keywords = any(kw in text.lower() or kw in href.lower() for kw in ['download', '1080', '720', '480', 'drive', 'csplayer', 'pixeldrain', 't.me'])
+                # Quality, Size, Language වෙන් කරගැනීම (උදා: WEB-DL 480p • 400 MB • English)
+                parts = [p.strip() for p in meta_text.split('•')]
+                quality = parts[0] if len(parts) > 0 else "Unknown Quality"
+                size = parts[1] if len(parts) > 1 else "Unknown Size"
+                language = parts[2] if len(parts) > 2 else "Unknown Language"
                 
-                if is_button or has_keywords:
+                actual_link = href
+                
+                # zt-links හරහා ගොස් සැබෑ CSPlayer ලින්ක් එක සොයාගැනීම
+                if 'zt-links' in href:
+                    try:
+                        zt_res = requests.get(href, headers=headers, timeout=5)
+                        zt_soup = BeautifulSoup(zt_res.text, 'html.parser')
+                        link_tag = zt_soup.find('a', id='link')
+                        if link_tag and link_tag.get('href'):
+                            actual_link = link_tag.get('href')
+                    except Exception as e:
+                        pass # දෝෂයක් ආවොත් මුල් ලින්ක් එකම තබාගනී
+                
+                if not any(d['link'] == actual_link for d in download_urls):
+                    download_urls.append({
+                        "quality": quality,
+                        "size": size,
+                        "language": language,
+                        "link": actual_link
+                    })
+        else:
+            # පැරණි ආකෘතිය සඳහා Fallback (අමතර ආරක්ෂාවට)
+            for a_tag in soup.find_all('a', href=True):
+                href = a_tag['href']
+                text = a_tag.text.strip()
+                if 'csplayer' in href or 'drive.' in href:
                     quality = "1080p" if "1080" in text else "720p" if "720" in text else "480p" if "480" in text else "WEB-DL"
                     size_match = re.search(r'(\d+(?:\.\d+)?\s*(?:MB|GB))', text, re.IGNORECASE)
                     size = size_match.group(1) if size_match else "Unknown Size"
-                    
                     if not any(d['link'] == href for d in download_urls):
                         download_urls.append({
                             "quality": quality,
