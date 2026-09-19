@@ -221,10 +221,11 @@ def get_movie_details(url: str = Query(..., description="Movie page URL")):
 
 @app.get("/api/cinesubz/resolve")
 def resolve_csplayer_link(url: str = Query(..., description="CSPlayer Download URL")):
-    """CSPlayer ලින්ක් එකකට ගොස් සැබෑ Direct MP4 සහ Telegram Bot ලින්ක්ස් Bypass කරයි."""
+    """CSPlayer ලින්ක් එකකට ගොස් සැබෑ Direct MP4 සහ Telegram ලින්ක්ස් Bypass කරයි."""
     try:
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": "https://cinesubz.lk/"
         }
         
         response = requests.get(url, headers=headers)
@@ -234,16 +235,17 @@ def resolve_csplayer_link(url: str = Query(..., description="CSPlayer Download U
         soup = BeautifulSoup(html, 'html.parser')
         actual_urls = []
         
+        # අපට අනවශ්‍ය ලින්ක්ස් (Blacklist)
+        unwanted_keywords = ['cinesubzmoviesofficial', 'share', 'facebook', 'twitter', 'instagram', 'whatsapp']
+        
         for a_tag in soup.find_all('a', href=True):
             href = a_tag['href']
             
-            # Telegram Bot ලින්ක් එක හඳුනාගැනීම (?start= අඩංගු විය යුතුය)
-            is_telegram_bot = ('telegram.me' in href or 't.me' in href) and '?start=' in href
+            # Telegram, Drive හෝ MP4 ලින්ක් එකක් දැයි පරීක්ෂා කිරීම
+            is_potential_dl = 'telegram.me' in href or 't.me' in href or 'drive' in href.lower() or '.mp4' in href or '.mkv' in href or 'token=' in href
             
-            # Direct MP4 ලින්ක් එක හඳුනාගැනීම (?token= හෝ .mp4 අඩංගු විය යුතුය)
-            is_direct_file = '?token=' in href or '.mp4' in href
-            
-            if is_telegram_bot or is_direct_file:
+            # අනවශ්‍ය ලින්ක් එකක් (CineSubzMoviesOfficial වැනි) නොවන බව තහවුරු කිරීම
+            if is_potential_dl and not any(bad in href.lower() for bad in unwanted_keywords):
                 if not any(d['url'] == href for d in actual_urls):
                     actual_urls.append({"url": href})
                     
