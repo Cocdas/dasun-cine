@@ -130,19 +130,18 @@ def get_downloadwella_direct_link(url: str):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-
 # ==========================================
 # 2. CINESUBZ ENDPOINTS
 # ==========================================
 
-CINESUBZ_BASE_URL = "https://cinesubz.net/"
+CINESUBZ_BASE_URL = "https://cinesubz.lk/"
 
 @app.get("/api/cinesubz/search")
 def search_movies(query: str = Query(..., description="Movie name to search")):
     """CineSubz වෙබ් අඩවිය තුළ චිත්‍රපට සෙවීම සහ අලුත් JSON ආකෘතියට ප්‍රතිඵල ලබා දීම."""
     try:
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Referer": CINESUBZ_BASE_URL
         }
         
@@ -157,39 +156,36 @@ def search_movies(query: str = Query(..., description="Movie name to search")):
         movies = []
         tvshows = []
         
-        items = soup.find_all(['article', 'div'], class_=lambda x: x and ('post' in x or 'item' in x or 'ittl' in x or 'box' in x))
-        if not items:
-            items = soup.find_all('div', class_='result-item') or soup.find_all('article') or soup.find_all('div', class_='search-result')
-
+        items = soup.find_all('div', class_='display-item')
+        
         for item in items:
-            title_tag = item.find(['h2', 'h3', 'a'], class_=['title', 'tit']) or item.find('a')
-            link_tag = item.find('a')
+            a_tag = item.find('a', href=True)
             img_tag = item.find('img')
+            imdb_tag = item.find('span', class_='imdb-score')
             
-            if link_tag and title_tag:
-                title = title_tag.text.strip()
-                link = link_tag.get('href')
-                
-                if not title or not link or link == CINESUBZ_BASE_URL:
-                    continue
-                
-                image = None
-                if img_tag:
-                    image = img_tag.get('data-src') or img_tag.get('src') or img_tag.get('data-lazy-src')
-                
-                if link.startswith('http') and not any(r['link'] == link for r in all_results):
+            if a_tag:
+                title = a_tag.get('title', '').strip()
+                if not title:
+                    h3_tag = item.find('h3')
+                    title = h3_tag.text.strip() if h3_tag else ''
                     
-                    # 1. වර්ෂය (Year) සොයා ගැනීම
+                link = a_tag.get('href', '')
+                
+                image = ''
+                if img_tag:
+                    image = img_tag.get('data-original') or img_tag.get('src', '')
+                    
+                imdb_score = imdb_tag.text.strip() if imdb_tag else ""
+                
+                if title and link:
                     year_match = re.search(r'\((\d{4})\)', title)
                     year = year_match.group(1) if year_match else ""
                     
-                    # 2. Movie ද TV Show ද යන්න තීරණය කිරීම
-                    is_tv = 'tvshows' in link or 'tv-shows' in link or 'season' in link.lower() or 'episode' in link.lower()
-                    media_type = "TV Show" if is_tv else "Movie"
+                    media_type = "TV Show" if a_tag.get('data-ptype') == 'tvshows' or '/tvshows/' in link else "Movie"
                     
                     result_obj = {
                         "title": title,
-                        "imdb": "", 
+                        "imdb": imdb_score,
                         "year": year,
                         "link": link,
                         "image": image,
@@ -222,7 +218,7 @@ def get_movie_download_links(url: str = Query(..., description="Movie page URL f
     """CineSubz ලින්ක් එක (URL) ලබා දී, එහි ඇති ඩවුන්ලෝඩ් ලින්ක්ස් සහ විස්තර ලබා ගනී."""
     try:
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Referer": CINESUBZ_BASE_URL
         }
         response = requests.get(url, headers=headers)
