@@ -4,133 +4,23 @@ from bs4 import BeautifulSoup
 from urllib.parse import quote
 import re
 
-# API එක ආරම්භ කිරීම - Developed by Dasun Nethsara
+# CineSubz සඳහා පමණක් වෙන්වූ API එක - Developed by Dasun Nethsara
 app = FastAPI(
-    title="Movie & Drama Scraper API", 
-    description="Automated scraping tool for Dramakey, Downloadwella, and CineSubz"
+    title="CineSubz Scraper API", 
+    description="Automated scraping tool dedicated for CineSubz"
 )
 
 @app.get("/")
 def read_root():
     """API එක නිවැරදිව වැඩ කරනවාද යන්න පරීක්ෂා කිරීමේ endpoint එක."""
     return {
-        "message": "Welcome to the Scraper API!",
+        "message": "Welcome to the CineSubz Scraper API!",
         "developer": "Dasun Nethsara",
         "status": "Running smoothly 🚀"
     }
 
 # ==========================================
-# 1. DRAMAKEY & DOWNLOADWELLA ENDPOINTS
-# ==========================================
-
-@app.get("/api/dramas")
-def get_dramas():
-    """Dramakey මුල් පිටුවෙන් Drama මාතෘකා සහ links ලබා දෙයි."""
-    try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        response = requests.get("https://dramakey.com/", headers=headers)
-        response.raise_for_status() 
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        dramas = []
-        
-        for heading in soup.find_all(['h2', 'h3']):
-            link_tag = heading.find('a')
-            if link_tag:
-                title = link_tag.text.strip()
-                link = link_tag.get('href')
-                if title and link:
-                    dramas.append({"title": title, "link": link})
-                    
-        return {"status": "success", "total_dramas_found": len(dramas), "data": dramas}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-@app.get("/api/download")
-def get_download_links(url: str):
-    """අදාළ ඩ්‍රාමා පිටුවේ ඇති ඩවුන්ලෝඩ් ලින්ක්ස් (Downloadwella/වෙනත්) ලබා දෙයි."""
-    try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        response = requests.get(url, headers=headers)
-        response.raise_for_status() 
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        download_links = []
-        content_area = soup.find('div', class_='entry-content')
-        
-        if content_area:
-            for link_tag in content_area.find_all('a'):
-                link_text = link_tag.text.strip()
-                link_href = link_tag.get('href')
-                if link_text and link_href and link_href.startswith('http'):
-                    download_links.append({"label": link_text, "url": link_href})
-                    
-        return {"status": "success", "drama_url": url, "download_links": download_links}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-@app.get("/api/downloadwella")
-def get_downloadwella_direct_link(url: str):
-    """Downloadwella ලින්ක් එකක් ලබාගෙන එහි අවසාන Direct Link එක ලබා දෙයි."""
-    try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": url
-        }
-        
-        session = requests.Session()
-        response = session.get(url, headers=headers)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        form = soup.find('form')
-        if not form:
-            return {"status": "error", "message": "Form not found on step 1."}
-            
-        form_data = {}
-        for input_tag in form.find_all('input'):
-            input_name = input_tag.get('name')
-            if input_name:
-                form_data[input_name] = input_tag.get('value', '')
-                
-        post_response = session.post(url, data=form_data, headers=headers)
-        post_response.raise_for_status()
-        
-        post_soup = BeautifulSoup(post_response.text, 'html.parser')
-        direct_link = None
-        all_links = []
-        
-        for a_tag in post_soup.find_all('a'):
-            href = a_tag.get('href')
-            if href:
-                all_links.append(href)
-                if href.endswith(('.mkv', '.mp4', '.zip', '.rar')) or '/d/' in href:
-                    direct_link = href
-                    break
-        
-        if not direct_link:
-            span_link = post_soup.find('span', id='direct_link')
-            if span_link and span_link.find('a'):
-                direct_link = span_link.find('a').get('href')
-
-        if direct_link:
-            return {
-                "status": "success", 
-                "developer": "Dasun Nethsara",
-                "original_url": url, 
-                "direct_download_link": direct_link
-            }
-        else:
-            return {
-                "status": "error", 
-                "message": "Could not find the final direct link. Inspect 'debug_links_found'.",
-                "debug_links_found": all_links
-            }
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-# ==========================================
-# 2. CINESUBZ ENDPOINTS
+# CINESUBZ ENDPOINTS ONLY
 # ==========================================
 
 CINESUBZ_BASE_URL = "https://cinesubz.lk/"
@@ -258,8 +148,6 @@ def get_movie_details(url: str = Query(..., description="Movie page URL")):
 
         # 3. ඩවුන්ලෝඩ් ලින්ක්ස් ලබා ගැනීම (zt-links විසඳීම)
         download_urls = []
-        
-        # අලුත් ආකෘතිය: 'movie-download-button' සෙවීම
         download_buttons = soup.find_all('a', class_='movie-download-button')
         
         if download_buttons:
@@ -268,7 +156,7 @@ def get_movie_details(url: str = Query(..., description="Movie page URL")):
                 meta_span = btn.find('span', class_='movie-download-meta')
                 meta_text = meta_span.text if meta_span else ""
                 
-                # Quality, Size, Language වෙන් කරගැනීම (උදා: WEB-DL 480p • 400 MB • English)
+                # Quality, Size, Language වෙන් කරගැනීම
                 parts = [p.strip() for p in meta_text.split('•')]
                 quality = parts[0] if len(parts) > 0 else "Unknown Quality"
                 size = parts[1] if len(parts) > 1 else "Unknown Size"
@@ -276,7 +164,6 @@ def get_movie_details(url: str = Query(..., description="Movie page URL")):
                 
                 actual_link = href
                 
-                # zt-links හරහා ගොස් සැබෑ CSPlayer ලින්ක් එක සොයාගැනීම
                 if 'zt-links' in href:
                     try:
                         zt_res = requests.get(href, headers=headers, timeout=5)
@@ -285,7 +172,7 @@ def get_movie_details(url: str = Query(..., description="Movie page URL")):
                         if link_tag and link_tag.get('href'):
                             actual_link = link_tag.get('href')
                     except Exception as e:
-                        pass # දෝෂයක් ආවොත් මුල් ලින්ක් එකම තබාගනී
+                        pass
                 
                 if not any(d['link'] == actual_link for d in download_urls):
                     download_urls.append({
@@ -295,7 +182,6 @@ def get_movie_details(url: str = Query(..., description="Movie page URL")):
                         "link": actual_link
                     })
         else:
-            # පැරණි ආකෘතිය සඳහා Fallback (අමතර ආරක්ෂාවට)
             for a_tag in soup.find_all('a', href=True):
                 href = a_tag['href']
                 text = a_tag.text.strip()
