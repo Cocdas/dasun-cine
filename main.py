@@ -3,11 +3,15 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import quote
 import re
+import base64
+import hashlib
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import unpad
 
 # CineSubz සඳහා පමණක් වෙන්වූ API එක - Developed by Dasun Nethsara
 app = FastAPI(
     title="CineSubz Scraper API", 
-    description="Automated scraping tool dedicated for CineSubz"
+    description="Automated scraping tool dedicated for CineSubz with AES Decryption"
 )
 
 @app.get("/")
@@ -18,6 +22,40 @@ def read_root():
         "developer": "Dasun Nethsara",
         "status": "Running smoothly 🚀"
     }
+
+# ==========================================
+# AES Decryption Function
+# ==========================================
+def decrypt_cinesubz_link(encrypted_text: str) -> str:
+    """CineSubz (CSPlayer) හි ඇති Encrypted Base64 ලින්ක් එක kasun පාස්වර්ඩ් එකෙන් Decrypt කිරීම"""
+    password = "kasun"
+    try:
+        encrypted_bytes = base64.b64decode(encrypted_text)
+        
+        if not encrypted_bytes.startswith(b"Salted__"):
+            return None
+            
+        salt = encrypted_bytes[8:16]
+        ciphertext = encrypted_bytes[16:]
+        
+        key_iv = b""
+        prev = b""
+        while len(key_iv) < 48:
+            prev = hashlib.md5(prev + password.encode('utf-8') + salt).digest()
+            key_iv += prev
+            
+        key = key_iv[:32]
+        iv = key_iv[32:48]
+        
+        cipher = AES.new(key, AES.MODE_CBC, iv)
+        decrypted_padded = cipher.decrypt(ciphertext)
+        decrypted_link = unpad(decrypted_padded, AES.block_size).decode('utf-8')
+        
+        # අනවශ්‍ය quotation marks තිබේ නම් ඉවත් කිරීම
+        decrypted_link = decrypted_link.strip('"').strip("'")
+        return decrypted_link
+    except Exception as e:
+        return None
 
 # ==========================================
 # CINESUBZ ENDPOINTS ONLY
@@ -218,7 +256,7 @@ def get_movie_details(url: str = Query(..., description="Movie page URL")):
 
 @app.get("/api/cinesubz/resolve")
 def resolve_csplayer_link(url: str = Query(..., description="CSPlayer Download URL")):
-    """අපි හොයාගත් /api/download-data භාවිතයෙන් සහ HTML scraping මඟින් Token/MP4 ලින්ක් ලබා ගැනීම."""
+    """අපි හොයාගත් /api/download-data භාවිතයෙන්, HTML scraping මඟින් සහ AES Decryption මඟින් MP4 ලින්ක් ලබා ගැනීම."""
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -234,32 +272,40 @@ def resolve_csplayer_link(url: str = Query(..., description="CSPlayer Download U
             api_res = requests.post(api_endpoint, headers=headers, data={"url": url}, timeout=5)
             if api_res.status_code == 200:
                 json_data = api_res.json()
-                # ලැබෙන JSON එක ඇතුළේ ලින්ක්ස් තිබේ නම් ඒවා ලබා ගැනීම
                 if isinstance(json_data, dict):
                     for key, val in json_data.items():
                         if isinstance(val, str) and ('token=' in val or '.mp4' in val or 't.me' in val):
                             if not any(d['url'] == val for d in actual_urls):
-                                actual_urls.append({"url": val})
+                                actual_urls.append({"url": val, "type": "API Extracted"})
         except Exception:
             pass
 
-        # 2. සාමාන්‍ය පිටුවට ගොස් HTML/JS කේතයෙන් Token සහ Telegram ලින්ක්ස් සෙවීම (Fallback)
+        # 2. සාමාන්‍ය පිටුවට ගොස් HTML/JS කේතය ලබා ගැනීම
         response = requests.get(url, headers=headers)
         response.raise_for_status()
         html = response.text
         
-        # Telegram Bot ලින්ක්ස් සෙවීම
+        # 3. AES Encrypted Text සෙවීම සහ Decrypt කිරීම (අලුතින් එකතු කළ කොටස)
+        # CryptoJS මඟින් Encrypt කළ දත්ත 'U2FsdGVkX1' වලින් ආරම්භ වේ
+        encrypted_matches = re.findall(r'(U2FsdGVkX1[a-zA-Z0-9\/\+]+={0,2})', html)
+        for enc_text in encrypted_matches:
+            decrypted_url = decrypt_cinesubz_link(enc_text)
+            if decrypted_url and ('http' in decrypted_url or '.mp4' in decrypted_url):
+                if not any(d['url'] == decrypted_url for d in actual_urls):
+                    actual_urls.append({"url": decrypted_url, "type": "Decrypted Direct Link"})
+        
+        # 4. Telegram Bot ලින්ක්ස් සෙවීම (Fallback)
         tg_links = re.findall(r'(https?://(?:t\.me|telegram\.me)/[a-zA-Z0-9_]+\?start=[a-zA-Z0-9_]+)', html)
         for tg in tg_links:
             if not any(d['url'] == tg for d in actual_urls):
-                actual_urls.append({"url": tg})
+                actual_urls.append({"url": tg, "type": "Telegram Bot"})
                 
-        # Token සහිත MP4 ලින්ක්ස් සෙවීම
+        # 5. Token සහිත MP4 ලින්ක්ස් සෙවීම (Fallback)
         token_links = re.findall(r'(https?://[^\s"\'<>]+(?:token=[a-zA-Z0-9\.\-\_]+|\.mp4))', html)
         for dl in token_links:
             if ('token=' in dl or '.mp4' in dl) and 'cinesubz' not in dl.lower():
                 if not any(d['url'] == dl for d in actual_urls):
-                    actual_urls.append({"url": dl})
+                    actual_urls.append({"url": dl, "type": "Token/MP4 Link"})
                     
         return {
             "author": "@DasunNethsara",
