@@ -11,7 +11,7 @@ from Crypto.Util.Padding import unpad
 # CineSubz සඳහා පමණක් වෙන්වූ API එක - Developed by Dasun Nethsara
 app = FastAPI(
     title="CineSubz Scraper API", 
-    description="Automated scraping tool dedicated for CineSubz with AES Decryption & Hex POST Bypass"
+    description="Automated scraping tool dedicated for CineSubz with AES Decryption, Hex POST Bypass & Domain Replacement"
 )
 
 @app.get("/")
@@ -256,7 +256,7 @@ def get_movie_details(url: str = Query(..., description="Movie page URL")):
 
 @app.get("/api/cinesubz/resolve")
 def resolve_csplayer_link(url: str = Query(..., description="CSPlayer Download URL")):
-    """HTML scraping, Hex POST Request සහ AES Decryption මඟින් MP4 ලින්ක් ලබා ගැනීම."""
+    """HTML scraping, Hex POST Request, AES Decryption සහ Domain Replacement මඟින් MP4 ලින්ක් ලබා ගැනීම."""
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -279,7 +279,7 @@ def resolve_csplayer_link(url: str = Query(..., description="CSPlayer Download U
         response.raise_for_status()
         html = response.text
         
-        # 2. අලුත් ක්‍රමය: Hex කේත සොයාගෙන POST Request එකක් යැවීම
+        # 2. Hex කේත සොයාගෙන POST Request එකක් යැවීම
         hex_matches = re.findall(r'([a-fA-F0-9]{150,})', html)
         for hex_str in hex_matches:
             try:
@@ -296,16 +296,26 @@ def resolve_csplayer_link(url: str = Query(..., description="CSPlayer Download U
                     for enc_text in enc_matches:
                         decrypted_url = decrypt_cinesubz_link(enc_text)
                         if decrypted_url and ('http' in decrypted_url or '.mp4' in decrypted_url):
+                            
+                            # --- අලුත් වෙනස: බොරු google.com ඩොමේන් එක ඇත්ත ඩොමේන් එකට මාරු කිරීම ---
+                            if "google.com" in decrypted_url:
+                                decrypted_url = decrypted_url.replace("google.com", "drive.csplayer2.space")
+                                
                             if not any(d['url'] == decrypted_url for d in actual_urls):
                                 actual_urls.append({"url": decrypted_url, "type": "Hex POST Decrypted Link"})
             except Exception as e:
                 continue
 
-        # 3. පරණ ක්‍රමය: HTML එකේම Encrypted Text තිබේ නම් එය Decrypt කිරීම
+        # 3. HTML එකේම Encrypted Text තිබේ නම් එය Decrypt කිරීම
         encrypted_matches = re.findall(r'(U2FsdGVkX1[a-zA-Z0-9\/\+]+={0,2})', html)
         for enc_text in encrypted_matches:
             decrypted_url = decrypt_cinesubz_link(enc_text)
             if decrypted_url and ('http' in decrypted_url or '.mp4' in decrypted_url):
+                
+                # --- අලුත් වෙනස: බොරු google.com ඩොමේන් එක ඇත්ත ඩොමේන් එකට මාරු කිරීම ---
+                if "google.com" in decrypted_url:
+                    decrypted_url = decrypted_url.replace("google.com", "drive.csplayer2.space")
+                    
                 if not any(d['url'] == decrypted_url for d in actual_urls):
                     actual_urls.append({"url": decrypted_url, "type": "HTML Decrypted Direct Link"})
         
