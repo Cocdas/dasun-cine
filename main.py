@@ -11,7 +11,7 @@ from Crypto.Util.Padding import unpad
 # CineSubz සඳහා පමණක් වෙන්වූ API එක - Developed by Dasun Nethsara
 app = FastAPI(
     title="CineSubz Scraper API", 
-    description="Automated scraping tool dedicated for CineSubz with AES Decryption"
+    description="Automated scraping tool dedicated for CineSubz with AES Decryption & Hex POST Bypass"
 )
 
 @app.get("/")
@@ -256,51 +256,65 @@ def get_movie_details(url: str = Query(..., description="Movie page URL")):
 
 @app.get("/api/cinesubz/resolve")
 def resolve_csplayer_link(url: str = Query(..., description="CSPlayer Download URL")):
-    """අපි හොයාගත් /api/download-data භාවිතයෙන්, HTML scraping මඟින් සහ AES Decryption මඟින් MP4 ලින්ක් ලබා ගැනීම."""
+    """HTML scraping, Hex POST Request සහ AES Decryption මඟින් MP4 ලින්ක් ලබා ගැනීම."""
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": url,
-            "X-Requested-With": "XMLHttpRequest"
+            "Referer": "https://cinesubz.lk/",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
         }
         
         actual_urls = []
         
-        # 1. අපි සොයාගත් රහසිගත API එකට (POST request) යැවීම මඟින් උත්සාහ කිරීම
-        api_endpoint = "https://drive.csplayer2.space/api/download-data"
-        try:
-            api_res = requests.post(api_endpoint, headers=headers, data={"url": url}, timeout=5)
-            if api_res.status_code == 200:
-                json_data = api_res.json()
-                if isinstance(json_data, dict):
-                    for key, val in json_data.items():
-                        if isinstance(val, str) and ('token=' in val or '.mp4' in val or 't.me' in val):
-                            if not any(d['url'] == val for d in actual_urls):
-                                actual_urls.append({"url": val, "type": "API Extracted"})
-        except Exception:
-            pass
-
-        # 2. සාමාන්‍ය පිටුවට ගොස් HTML/JS කේතය ලබා ගැනීම
-        response = requests.get(url, headers=headers)
+        # 1. සාමාන්‍ය පිටුවට ගොස් HTML/JS කේතය ලබා ගැනීම
+        response = requests.get(url, headers=headers, timeout=15)
+        
+        if response.status_code == 404:
+            return {
+                "author": "@DasunNethsara",
+                "status": False,
+                "message": "මෙම වීඩියෝව සර්වර් එකෙන් ඉවත් කර හෝ කල් ඉකුත් වී ඇත (404 Not Found)."
+            }
+            
         response.raise_for_status()
         html = response.text
         
-        # 3. AES Encrypted Text සෙවීම සහ Decrypt කිරීම (අලුතින් එකතු කළ කොටස)
-        # CryptoJS මඟින් Encrypt කළ දත්ත 'U2FsdGVkX1' වලින් ආරම්භ වේ
+        # 2. අලුත් ක්‍රමය: Hex කේත සොයාගෙන POST Request එකක් යැවීම
+        hex_matches = re.findall(r'([a-fA-F0-9]{150,})', html)
+        for hex_str in hex_matches:
+            try:
+                payload = bytes.fromhex(hex_str)
+                post_headers = headers.copy()
+                post_headers["Content-Type"] = "application/octet-stream"
+                
+                post_res = requests.post(url, headers=post_headers, data=payload, timeout=10)
+                
+                if post_res.status_code == 200:
+                    res_text = post_res.content.decode(errors='ignore')
+                    enc_matches = re.findall(r'(U2FsdGVkX1[a-zA-Z0-9\/\+]+={0,2})', res_text)
+                    
+                    for enc_text in enc_matches:
+                        decrypted_url = decrypt_cinesubz_link(enc_text)
+                        if decrypted_url and ('http' in decrypted_url or '.mp4' in decrypted_url):
+                            if not any(d['url'] == decrypted_url for d in actual_urls):
+                                actual_urls.append({"url": decrypted_url, "type": "Hex POST Decrypted Link"})
+            except Exception as e:
+                continue
+
+        # 3. පරණ ක්‍රමය: HTML එකේම Encrypted Text තිබේ නම් එය Decrypt කිරීම
         encrypted_matches = re.findall(r'(U2FsdGVkX1[a-zA-Z0-9\/\+]+={0,2})', html)
         for enc_text in encrypted_matches:
             decrypted_url = decrypt_cinesubz_link(enc_text)
             if decrypted_url and ('http' in decrypted_url or '.mp4' in decrypted_url):
                 if not any(d['url'] == decrypted_url for d in actual_urls):
-                    actual_urls.append({"url": decrypted_url, "type": "Decrypted Direct Link"})
+                    actual_urls.append({"url": decrypted_url, "type": "HTML Decrypted Direct Link"})
         
-        # 4. Telegram Bot ලින්ක්ස් සෙවීම (Fallback)
+        # 4. Telegram සහ සාමාන්‍ය Token ලින්ක්ස් සෙවීම (Fallback)
         tg_links = re.findall(r'(https?://(?:t\.me|telegram\.me)/[a-zA-Z0-9_]+\?start=[a-zA-Z0-9_]+)', html)
         for tg in tg_links:
             if not any(d['url'] == tg for d in actual_urls):
                 actual_urls.append({"url": tg, "type": "Telegram Bot"})
                 
-        # 5. Token සහිත MP4 ලින්ක්ස් සෙවීම (Fallback)
         token_links = re.findall(r'(https?://[^\s"\'<>]+(?:token=[a-zA-Z0-9\.\-\_]+|\.mp4))', html)
         for dl in token_links:
             if ('token=' in dl or '.mp4' in dl) and 'cinesubz' not in dl.lower():
@@ -317,4 +331,4 @@ def resolve_csplayer_link(url: str = Query(..., description="CSPlayer Download U
             }
         }
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"status": False, "author": "@DasunNethsara", "message": f"Error: {str(e)}"}
