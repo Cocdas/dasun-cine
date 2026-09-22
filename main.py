@@ -11,7 +11,7 @@ from Crypto.Util.Padding import unpad
 # CineSubz සඳහා පමණක් වෙන්වූ API එක - Developed by Dasun Nethsara
 app = FastAPI(
     title="CineSubz Scraper API", 
-    description="Automated scraping tool dedicated for CineSubz with AES Decryption & Domain Replacement"
+    description="Automated scraping tool dedicated for CineSubz matching target JSON format"
 )
 
 @app.get("/")
@@ -27,7 +27,7 @@ def read_root():
 # AES Decryption Function
 # ==========================================
 def decrypt_cinesubz_link(encrypted_text: str) -> str:
-    """CineSubz (CSPlayer) හි ඇති Encrypted Base64 ලින්ක් එක kasun පාස්වර්ඩ් එකෙන් Decrypt කිරීම"""
+    """CSPlayer හි ඇති Encrypted Base64 ලින්ක් එක kasun පාස්වර්ඩ් එකෙන් Decrypt කිරීම"""
     password = "kasun"
     try:
         encrypted_bytes = base64.b64decode(encrypted_text)
@@ -51,7 +51,6 @@ def decrypt_cinesubz_link(encrypted_text: str) -> str:
         decrypted_padded = cipher.decrypt(ciphertext)
         decrypted_link = unpad(decrypted_padded, AES.block_size).decode('utf-8')
         
-        # අනවශ්‍ය quotation marks තිබේ නම් ඉවත් කිරීම
         decrypted_link = decrypted_link.strip('"').strip("'")
         return decrypted_link
     except Exception as e:
@@ -138,7 +137,7 @@ def search_movies(query: str = Query(..., description="Movie name to search")):
 
 @app.get("/api/cinesubz/movie")
 def get_movie_details(url: str = Query(..., description="Movie page URL")):
-    """චිත්‍රපටයේ සම්පූර්ණ විස්තර සහ ඩවුන්ලෝඩ් ලින්ක්ස් ලබා ගැනීම."""
+    """චිත්‍රපටයේ සම්පූර්ණ විස්තර සහ ඩවුන්ලෝඩ් ලින්ක්ස් නිවැරදිව ලබා ගැනීම."""
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -149,39 +148,66 @@ def get_movie_details(url: str = Query(..., description="Movie page URL")):
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        meta_title = soup.find('meta', property='og:title')
-        if meta_title:
-            title = meta_title.get('content', '').split('|')[0].strip()
-        else:
-            title_element = soup.find('h1')
-            title = title_element.text.strip() if title_element else "Unknown Title"
+        # 1. Title නිවැරදිව ලබා ගැනීම (Split නොකර)
+        title_element = soup.find('h1')
+        title = title_element.text.strip() if title_element else "Unknown Title"
         
         year_match = re.search(r'\((\d{4})\)', title)
         year = year_match.group(1) if year_match else ""
-        maintitle = re.sub(r'Sinhala Subtitles.*', '', title).strip()
+        maintitle = re.sub(r'Sinhala Subtitles.*|සිංහල උපසිරැසි සමඟ.*', '', title).strip()
         
+        # 2. Images ලබා ගැනීම (අනවශ්‍ය ලෝගෝ ඉවත් කර සියල්ල ලබා ගැනීම)
         images = []
-        main_image = ""
         for img in soup.find_all('img'):
             src = img.get('data-src') or img.get('src') or ""
             if src.startswith('http') and ('uploads' in src or 'tmdb.org' in src):
-                if src not in images:
-                    images.append(src)
-        if images:
-            main_image = images[0]
+                # අනවශ්‍ය ලෝගෝ ෆිල්ටර් කිරීම
+                if 'cinesibz' not in src.lower() and 'logo' not in src.lower() and 'avatar' not in src.lower():
+                    if src not in images:
+                        images.append(src)
+        
+        main_image = images[0] if images else ""
 
+        # 3. Country, Runtime, Category, IMDb අගයන් සොයා ගැනීම
+        country = ""
+        runtime = ""
+        category = []
+        imdb_val = ""
+
+        # Category සොයා ගැනීම
+        for a_tag in soup.find_all('a', rel='category tag'):
+            cat_name = a_tag.text.strip()
+            if cat_name and cat_name not in category:
+                category.append(cat_name)
+
+        # Country, Runtime, IMDb සෙවීම (HTML හි පවතින Text මඟින්)
+        for text_el in soup.stripped_strings:
+            if 'IMDb:' in text_el:
+                imdb_val = text_el.replace('IMDb:', '').strip()
+            elif 'Runtime:' in text_el or 'min' in text_el.lower():
+                rt_match = re.search(r'(\d+\s*min)', text_el, re.IGNORECASE)
+                if rt_match:
+                    runtime = rt_match.group(1)
+
+        # 4. Cast (නළු නිළියන්) නිවැරදිව ලබා ගැනීම (අනවශ්‍ය ලින්ක්ස් ඉවත් කර)
         cast_list = []
         directors = []
         for a_tag in soup.find_all('a', href=True):
             href = a_tag['href']
             name = a_tag.text.strip()
-            if '/cast/' in href and name:
+            
+            # අනවශ්‍ය Cast Collection ලින්ක්ස් ඉවත් කිරීම
+            if 'Cast Collection' in name or 'Go Full' in name or not name:
+                continue
+                
+            if '/cast/' in href:
                 if not any(c['actor']['name'] == name for c in cast_list):
                     cast_list.append({"actor": {"name": name, "link": href}, "character": ""})
-            elif '/director/' in href and name:
+            elif '/director/' in href:
                 if name not in directors:
                     directors.append(name)
 
+        # 5. Download Links නිවැරදි කිරීම (Google -> Drive සහ .mp4 -> ?ext=mp4)
         download_urls = []
         download_buttons = soup.find_all('a', class_='movie-download-button')
         
@@ -208,6 +234,12 @@ def get_movie_details(url: str = Query(..., description="Movie page URL")):
                     except Exception as e:
                         pass
                 
+                # --- අලුත් වෙනස: google.com මාරු කිරීම සහ ?ext=mp4 යෙදීම ---
+                if 'google.com' in actual_link:
+                    actual_link = actual_link.replace('google.com', 'drive.csplayer2.space')
+                if actual_link.endswith('.mp4') and 'drive.csplayer2.space' in actual_link:
+                    actual_link = actual_link[:-4] + '?ext=mp4'
+                
                 if not any(d['link'] == actual_link for d in download_urls):
                     download_urls.append({
                         "quality": quality,
@@ -223,6 +255,13 @@ def get_movie_details(url: str = Query(..., description="Movie page URL")):
                     quality = "1080p" if "1080" in text else "720p" if "720" in text else "480p" if "480" in text else "WEB-DL"
                     size_match = re.search(r'(\d+(?:\.\d+)?\s*(?:MB|GB))', text, re.IGNORECASE)
                     size = size_match.group(1) if size_match else "Unknown Size"
+                    
+                    # --- අලුත් වෙනස: google.com මාරු කිරීම සහ ?ext=mp4 යෙදීම ---
+                    if 'google.com' in href:
+                        href = href.replace('google.com', 'drive.csplayer2.space')
+                    if href.endswith('.mp4') and 'drive.csplayer2.space' in href:
+                        href = href[:-4] + '?ext=mp4'
+                        
                     if not any(d['link'] == href for d in download_urls):
                         download_urls.append({
                             "quality": quality,
@@ -231,6 +270,7 @@ def get_movie_details(url: str = Query(..., description="Movie page URL")):
                             "link": href
                         })
 
+        # --- @DarkYasiya Format එකට Output කිරීම ---
         return {
             "author": "@DasunNethsara",
             "status": True,
@@ -238,14 +278,14 @@ def get_movie_details(url: str = Query(..., description="Movie page URL")):
                 "maintitle": maintitle,
                 "title": title,
                 "dateCreate": year,
-                "country": "",
-                "runtime": "", 
-                "category": [],
+                "country": country,
+                "runtime": runtime, 
+                "category": category,
                 "mainImage": main_image,
-                "imageUrls": images[:2],
+                "imageUrls": images,
                 "description": "",
                 "rating": {"value": "00", "count": "00"},
-                "imdb": {"value": "", "count": "00"},
+                "imdb": {"value": imdb_val, "count": "00"},
                 "director": {"name": directors},
                 "cast": cast_list,
                 "downloadUrl": download_urls
@@ -258,12 +298,10 @@ def get_movie_details(url: str = Query(..., description="Movie page URL")):
 def resolve_csplayer_link(url: str = Query(..., description="CSPlayer Download URL")):
     """URL හරහා Title එක ලබාගෙන, JSON ආකෘතිය නිවැරදිව සකසා MP4 ලින්ක් ලබා දීම."""
     try:
-        # URL එකෙන් වීඩියෝවෙ නම (Title) වෙන් කර ගැනීම (උදා: Blast (2026).mp4)
         file_title = unquote(url.split('/')[-1])
         if '?ext=' in file_title:
             file_title = file_title.split('?ext=')[0]
 
-        # බොරු google.com ලින්ක් සර්වර් ඩොමේන් එකට මාරු කිරීම
         if "google.com" in url:
             url = url.replace("google.com", "drive.csplayer2.space")
 
@@ -275,7 +313,6 @@ def resolve_csplayer_link(url: str = Query(..., description="CSPlayer Download U
         
         actual_urls = []
         
-        # 1. සාමාන්‍ය පිටුවට ගොස් HTML/JS කේතය ලබා ගැනීම
         response = requests.get(url, headers=headers, timeout=15)
         
         if response.status_code == 404:
@@ -288,7 +325,6 @@ def resolve_csplayer_link(url: str = Query(..., description="CSPlayer Download U
         response.raise_for_status()
         html = response.text
         
-        # 2. Hex කේත සොයාගෙන POST Request එකක් යැවීම
         hex_matches = re.findall(r'([a-fA-F0-9]{150,})', html)
         for hex_str in hex_matches:
             try:
@@ -314,7 +350,6 @@ def resolve_csplayer_link(url: str = Query(..., description="CSPlayer Download U
             except Exception as e:
                 continue
 
-        # 3. HTML එකේම Encrypted Text තිබේ නම් එය Decrypt කිරීම
         encrypted_matches = re.findall(r'(U2FsdGVkX1[a-zA-Z0-9\/\+]+={0,2})', html)
         for enc_text in encrypted_matches:
             decrypted_url = decrypt_cinesubz_link(enc_text)
@@ -326,7 +361,6 @@ def resolve_csplayer_link(url: str = Query(..., description="CSPlayer Download U
                 if not any(d['url'] == decrypted_url for d in actual_urls):
                     actual_urls.append({"url": decrypted_url})
         
-        # 4. Telegram සහ සාමාන්‍ය Token ලින්ක්ස් සෙවීම (Fallback)
         tg_links = re.findall(r'(https?://(?:t\.me|telegram\.me)/[a-zA-Z0-9_]+\?start=[a-zA-Z0-9_]+)', html)
         for tg in tg_links:
             if not any(d['url'] == tg for d in actual_urls):
@@ -338,7 +372,6 @@ def resolve_csplayer_link(url: str = Query(..., description="CSPlayer Download U
                 if not any(d['url'] == dl for d in actual_urls):
                     actual_urls.append({"url": dl})
                     
-        # --- අලුත් වෙනස: හරියටම @DarkYasiya ගේ JSON Format එකට Output එක සැකසීම ---
         return {
             "author": "@DasunNethsara",
             "status": True,
