@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Query
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 import re
 import base64
 import hashlib
@@ -11,7 +11,7 @@ from Crypto.Util.Padding import unpad
 # CineSubz සඳහා පමණක් වෙන්වූ API එක - Developed by Dasun Nethsara
 app = FastAPI(
     title="CineSubz Scraper API", 
-    description="Automated scraping tool dedicated for CineSubz with AES Decryption, Hex POST Bypass & Domain Replacement"
+    description="Automated scraping tool dedicated for CineSubz with AES Decryption & Domain Replacement"
 )
 
 @app.get("/")
@@ -256,8 +256,17 @@ def get_movie_details(url: str = Query(..., description="Movie page URL")):
 
 @app.get("/api/cinesubz/resolve")
 def resolve_csplayer_link(url: str = Query(..., description="CSPlayer Download URL")):
-    """HTML scraping, Hex POST Request, AES Decryption සහ Domain Replacement මඟින් MP4 ලින්ක් ලබා ගැනීම."""
+    """URL හරහා Title එක ලබාගෙන, JSON ආකෘතිය නිවැරදිව සකසා MP4 ලින්ක් ලබා දීම."""
     try:
+        # URL එකෙන් වීඩියෝවෙ නම (Title) වෙන් කර ගැනීම (උදා: Blast (2026).mp4)
+        file_title = unquote(url.split('/')[-1])
+        if '?ext=' in file_title:
+            file_title = file_title.split('?ext=')[0]
+
+        # බොරු google.com ලින්ක් සර්වර් ඩොමේන් එකට මාරු කිරීම
+        if "google.com" in url:
+            url = url.replace("google.com", "drive.csplayer2.space")
+
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Referer": "https://cinesubz.lk/",
@@ -297,12 +306,11 @@ def resolve_csplayer_link(url: str = Query(..., description="CSPlayer Download U
                         decrypted_url = decrypt_cinesubz_link(enc_text)
                         if decrypted_url and ('http' in decrypted_url or '.mp4' in decrypted_url):
                             
-                            # --- අලුත් වෙනස: බොරු google.com ඩොමේන් එක ඇත්ත ඩොමේන් එකට මාරු කිරීම ---
                             if "google.com" in decrypted_url:
                                 decrypted_url = decrypted_url.replace("google.com", "drive.csplayer2.space")
                                 
                             if not any(d['url'] == decrypted_url for d in actual_urls):
-                                actual_urls.append({"url": decrypted_url, "type": "Hex POST Decrypted Link"})
+                                actual_urls.append({"url": decrypted_url})
             except Exception as e:
                 continue
 
@@ -312,30 +320,30 @@ def resolve_csplayer_link(url: str = Query(..., description="CSPlayer Download U
             decrypted_url = decrypt_cinesubz_link(enc_text)
             if decrypted_url and ('http' in decrypted_url or '.mp4' in decrypted_url):
                 
-                # --- අලුත් වෙනස: බොරු google.com ඩොමේන් එක ඇත්ත ඩොමේන් එකට මාරු කිරීම ---
                 if "google.com" in decrypted_url:
                     decrypted_url = decrypted_url.replace("google.com", "drive.csplayer2.space")
                     
                 if not any(d['url'] == decrypted_url for d in actual_urls):
-                    actual_urls.append({"url": decrypted_url, "type": "HTML Decrypted Direct Link"})
+                    actual_urls.append({"url": decrypted_url})
         
         # 4. Telegram සහ සාමාන්‍ය Token ලින්ක්ස් සෙවීම (Fallback)
         tg_links = re.findall(r'(https?://(?:t\.me|telegram\.me)/[a-zA-Z0-9_]+\?start=[a-zA-Z0-9_]+)', html)
         for tg in tg_links:
             if not any(d['url'] == tg for d in actual_urls):
-                actual_urls.append({"url": tg, "type": "Telegram Bot"})
+                actual_urls.append({"url": tg})
                 
         token_links = re.findall(r'(https?://[^\s"\'<>]+(?:token=[a-zA-Z0-9\.\-\_]+|\.mp4))', html)
         for dl in token_links:
             if ('token=' in dl or '.mp4' in dl) and 'cinesubz' not in dl.lower():
                 if not any(d['url'] == dl for d in actual_urls):
-                    actual_urls.append({"url": dl, "type": "Token/MP4 Link"})
+                    actual_urls.append({"url": dl})
                     
+        # --- අලුත් වෙනස: හරියටම @DarkYasiya ගේ JSON Format එකට Output එක සැකසීම ---
         return {
             "author": "@DasunNethsara",
             "status": True,
             "data": {
-                "title": "Direct Download File",
+                "title": file_title,
                 "size": "Original Quality",
                 "downloadUrls": actual_urls
             }
