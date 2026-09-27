@@ -134,9 +134,8 @@ def get_movie_details(url: str = Query(..., description="Movie page URL (e.g., h
         title_element = soup.find('h1')
         title = title_element.text.strip() if title_element else "Unknown Title"
         
-        # ඔබ වැරදීමකින් Download link එකක් දුන්නොත් එය හඳුනාගෙන පණිවිඩයක් දීමට
         if "Please Enable JavaScript" in title or "api-" in url:
-            return {"author": "@DasunNethsara", "status": False, "message": "කරුණාකර මෙතනට චිත්‍රපටයේ ප්‍රධාන පිටුවේ (Movie Page) ලින්ක් එක ලබා දෙන්න. ඩවුන්ලෝඩ් ලින්ක් ලබා නොදෙන්න."}
+            return {"author": "@DasunNethsara", "status": False, "message": "කරුණාකර මෙතනට චිත්‍රපටයේ ප්‍රධාන පිටුවේ (Movie Page) ලින්ක් එක ලබා දෙන්න."}
 
         year = re.search(r'\((\d{4})\)', title).group(1) if re.search(r'\((\d{4})\)', title) else ""
         maintitle = re.sub(r'Sinhala Subtitles.*|සිංහල උපසිරැසි සමඟ.*', '', title).strip()
@@ -193,21 +192,41 @@ def get_movie_details(url: str = Query(..., description="Movie page URL (e.g., h
 @app.get("/api/cinesubz/resolve")
 def resolve_csplayer_link(url: str = Query(..., description="CSPlayer Download URL")):
     try:
-        file_title = unquote(url.split('/')[-1]).split('?ext=')[0]
         if "google.com" in url: url = url.replace("google.com", "drive.csplayer2.space")
 
         response = scraper.get(url, headers={"Referer": CINESUBZ_BASE_URL}, timeout=15)
         if response.status_code == 404: return {"author": "@DarkYasiya", "status": False, "message": "වීඩියෝව ඉවත් කර ඇත."}
-        html = response.text
         
-        file_size = re.search(r'(\d+(?:\.\d+)?\s*(?:MB|GB))', html, re.IGNORECASE).group(1) if re.search(r'(\d+(?:\.\d+)?\s*(?:MB|GB))', html, re.IGNORECASE) else "Unknown Size"
+        html = response.text
+        final_url = str(response.url)
+
+        meta_refresh = re.search(r'url=([^"\'>]+)', html, re.IGNORECASE)
+        if meta_refresh:
+            redirect_url = meta_refresh.group(1).strip()
+            if redirect_url.startswith('/'):
+                redirect_url = f"{urlparse(url).scheme}://{urlparse(url).netloc}{redirect_url}"
+            
+            response = scraper.get(redirect_url, headers={"Referer": CINESUBZ_BASE_URL}, timeout=15)
+            html = response.text
+            final_url = str(response.url)
+
+        file_title = unquote(final_url.split('/')[-1]).split('?ext=')[0]
+        if not file_title or file_title.startswith('api-') or len(file_title) < 3:
+            file_title = "Unknown Title"
+
+        file_size = re.search(r'(\d+(?:\.\d+)?\s*(?:MB|GB))', html, re.IGNORECASE)
+        file_size = file_size.group(1) if file_size else "Unknown Size"
+        
         actual_urls = []
         
+        if ('drive.csplayer2.space' in final_url or '.mp4' in final_url) and not any(d['url'] == final_url for d in actual_urls):
+            actual_urls.append({"url": final_url})
+
         for api in re.findall(r'action="([^"]+)"', html):
             if '/api/source' in api or '/token' in api:
-                bypass_url = api if api.startswith('http') else f"https://{urlparse(url).netloc}{api}"
+                bypass_url = api if api.startswith('http') else f"https://{urlparse(final_url).netloc}{api}"
                 try:
-                    res = scraper.post(bypass_url, headers={"X-Requested-With": "XMLHttpRequest", "Referer": url})
+                    res = scraper.post(bypass_url, headers={"X-Requested-With": "XMLHttpRequest", "Referer": final_url})
                     if res.status_code == 200 and 'data' in res.json():
                         bypass_link = res.json()['data']
                         if not any(d['url'] == bypass_link for d in actual_urls): actual_urls.append({"url": bypass_link})
@@ -215,7 +234,7 @@ def resolve_csplayer_link(url: str = Query(..., description="CSPlayer Download U
         
         for hex_str in re.findall(r'([a-fA-F0-9]{150,})', html):
             try:
-                res_text = scraper.post(url, headers={"Content-Type": "application/octet-stream"}, data=bytes.fromhex(hex_str), timeout=10).content.decode(errors='ignore')
+                res_text = scraper.post(final_url, headers={"Content-Type": "application/octet-stream"}, data=bytes.fromhex(hex_str), timeout=10).content.decode(errors='ignore')
                 for enc_text in re.findall(r'(U2FsdGVkX1[a-zA-Z0-9\/\+]+={0,2})', res_text):
                     dec_url = decrypt_cinesubz_link(enc_text)
                     if dec_url and ('http' in dec_url or '.mp4' in dec_url):
